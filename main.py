@@ -655,22 +655,11 @@ def run_comparison(steps=120):
             model.step()
         results[level] = compute_run_metrics(model, steps)
 
-    cols    = ("blind", "local", "market", "full")
-    metrics = [
-        "time_to_saturation", "avg_trade_price", "price_volatility",
-        "gini_holdings", "speculator_holdings", "conservative_holdings",
-        "num_trades", "contested_trades", "avg_bidders",
-        "secondary_trades", "farmer_capital",
-    ]
-
-    print(f"\n{'Metric':<28} " + "  ".join(f"{c:>12}" for c in cols))
-    print("─" * 80)
-    for key in metrics:
-        row = f"{key:<28} "
-        for level in cols:
-            val  = results[level][key]
-            row += f"  {val:>12.2f}" if isinstance(val, float) else f"  {val:>12}"
-        print(row)
+    # Build a single-run DataFrame and reuse the MC formatter
+    rows = [{"info_level": lvl, **results[lvl]} for lvl in tiers]
+    df   = pd.DataFrame(rows)
+    # Duplicate mean as std=0 so the formatter works cleanly
+    print_mc_summary(df.loc[df.index.repeat(1)])   # single-run: std will be NaN → shows 0
     return results
 
 
