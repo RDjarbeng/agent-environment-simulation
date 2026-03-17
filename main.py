@@ -136,21 +136,23 @@ class Farmer(mesa.Agent):
 class Investor(mesa.Agent):
     def __init__(self, model, unique_id, is_speculator=True, information_level="blind"):
         super().__init__(model)
-        self.unique_id = unique_id
-        self.capital = 20000 if is_speculator else 15000
-        self.is_speculator = is_speculator
+        self.unique_id        = unique_id
+        self.capital          = 20000 if is_speculator else 15000
+        self.is_speculator    = is_speculator
         self.information_level = information_level
-        self.holdings = []
-        self.price_memory = []  # own past trade prices (local tier)
+        self.holdings         = []   # Plot objects
+        self.price_memory     = []   # own past trade prices  (local tier)
 
-    def value_contract(self, plot):
+    # ── Valuation ────────────────────────────────────────────────
+
+    def value_contract(self, plot, ask):
         expected_yield = 10
-        spot_price = 80
+        spot_price     = 80
 
-        risk_tolerance = 0.05 if self.is_speculator else 0.20
-        bid_multiplier = 1.3 if self.is_speculator else 0.9
-        perceived_risk = (0.15 if self.model.weather_shock < 0 else 0.05) * (1 - risk_tolerance)
-        base_value = spot_price * expected_yield * (1 - perceived_risk)
+        risk_tolerance  = 0.05 if self.is_speculator else 0.20
+        bid_multiplier  = 1.3  if self.is_speculator else 0.9
+        perceived_risk  = (0.15 if self.model.weather_shock < 0 else 0.05) * (1 - risk_tolerance)
+        base_value      = spot_price * expected_yield * (1 - perceived_risk)
 
         # ── Tier adjustments ──────────────────────────────────────────
         if self.information_level == "local" and self.price_memory:
@@ -162,47 +164,88 @@ class Investor(mesa.Agent):
                 base_value = 0.5 * base_value + 0.5 * (self.model.public_price_index * 1.1)
 
         elif self.information_level == "full":
-            # Bid up based on competitor interest in the same plot
-            competition = len(plot.interested_investors)
-            base_value = base_value * (1 + 0.05 * competition)
+            # Know how many other bids are already on this lot
+            existing_bids = len([
+                e for e in self.model.auction_queue
+                if e["plot"].unique_id == plot.unique_id
+            ])
+            base_value = base_value * (1 + 0.05 * existing_bids)
             if self.model.public_price_index is not None:
                 base_value = 0.5 * base_value + 0.5 * (self.model.public_price_index * 1.1)
 
         return base_value * bid_multiplier
 
     def step(self):
-        # Signal interest before buying (used by full-tier agents)
-        if self.information_level == "full":
-            for offer in self.model.offers:
-                offer["plot"].interested_investors.append(self.unique_id)
+        phase = self.model.phase
 
-        random.shuffle(self.model.offers)
-        for offer in self.model.offers[:]:
-            plot = offer["plot"]
-            price = offer["price"]
+        # Primary or secondary: bid on open auction lots
+        if phase in (PHASE_PRIMARY, PHASE_BANK, PHASE_SECONDARY):
+            self._bid_on_lots()
+
+        # Speculators can relist holdings when secondary market is active
+        if phase == PHASE_SECONDARY and self.is_speculator:
+            self._try_relist()
+
+    def _bid_on_lots(self):
+        """Submit at most one bid per step on the most attractive open lot."""
+        best       = None
+        best_score = 0.0
+
+        for entry in self.model.auction_queue:
+            plot = entry["plot"]
+            ask  = entry["ask"]
 
             if plot.reserved_by is not None:
                 continue
+            # Don't bid on something you already hold
+            if plot in self.holdings:
+                continue
+            # Don't double-bid on same plot
+            if any(b["investor"] is self for b in entry["bids"]):
+                continue
 
-            valuation = self.value_contract(plot)
-            if valuation > price and self.capital >= price:
-                plot.reserved_by = self.unique_id
-                plot.contract_price = price
-                self.capital -= price
-                self.holdings.append(plot)
-                self.price_memory.append(price)
-                self.model.offers.remove(offer)
-                self.model.trade_log.append({
-                    "step": self.model.current_step,
-                    "investor": self.unique_id,
-                    "price": price,
-                    "is_speculator": self.is_speculator,
-                    "info_level": self.information_level,
-                })
-                if self.model.verbose:
-                    print(f"Investor {self.unique_id} bought plot {plot.unique_id} "
-                          f"for ${price} (Valuation: ${valuation:.2f})")
-                break
+            valuation = self.value_contract(plot, ask)
+            score     = valuation - ask   # surplus
+            if valuation > ask and self.capital >= ask and score > best_score:
+                best       = entry
+                best_score = score
+
+        if best is not None:
+            bid_amount = self._bid_amount(best["ask"])
+            best["bids"].append({"investor": self, "amount": bid_amount})
+            if self.model.verbose:
+                print(f"  [Inv {self.unique_id}] bids ${bid_amount:.0f} on "
+                      f"plot {best['plot'].unique_id} (ask=${best['ask']})")
+
+    def _bid_amount(self, ask):
+        """Speculators shade up, conservatives shade to ask."""
+        if self.is_speculator:
+            return ask * random.uniform(1.01, 1.10)
+        return ask * random.uniform(1.00, 1.03)
+
+    def _try_relist(self):
+        """Relist a holding if market price > cost basis + 15 % profit target."""
+        idx = self.model.public_price_index
+        if idx is None:
+            return
+        for plot in self.holdings[:]:
+            if idx > plot.contract_price * 1.15:
+                ask = int(idx * random.uniform(0.95, 1.05))
+                # Only relist if not already in queue
+                already = any(e["plot"] is plot for e in self.model.auction_queue)
+                if not already:
+                    self.model.auction_queue.append({
+                        "plot":       plot,
+                        "ask":        ask,
+                        "bids":       [],
+                        "steps_open": 0,
+                        "source":     "secondary",
+                        "seller":     self,
+                    })
+                    if self.model.verbose:
+                        print(f"  [Inv {self.unique_id}] relists plot "
+                              f"{plot.unique_id} @ ${ask}")
+                break   # relist at most one per step
 
 
 # ─────────────────────────────────────────────
