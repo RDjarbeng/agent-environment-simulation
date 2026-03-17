@@ -27,12 +27,20 @@ class Farmer(mesa.Agent):
     def step(self):
         # A plot is available if it's not reserved AND not already being offered
         offered_plots = [o["plot"] for o in self.model.offers]
+        reserved_plots = [p for p in self.plots if p.reserved_by is not None]
         available = [p for p in self.plots if p.reserved_by is None and p not in offered_plots]
+        
+        utilization = len(reserved_plots) / len(self.plots)
+        
         if available and random.random() < 0.3:
             plot = random.choice(available)
-            price = 500 + random.randint(-50, 100)
+            
+            # Dynamic pricing: price increases as utilization goes up
+            base_price = 450 + (utilization * 300) 
+            price = int(base_price + random.randint(-30, 30))
+            
             self.model.offers.append({"plot": plot, "price": price})
-            print(f"Farmer offers plot {plot.unique_id} for ${price}")
+            print(f"Farmer offers plot {plot.unique_id} for ${price} (Util: {utilization:.2f})")
 
 class Investor(mesa.Agent):
     def __init__(self, model, unique_id, is_speculator=True):
@@ -45,8 +53,17 @@ class Investor(mesa.Agent):
     def value_contract(self, plot):
         expected_yield = 10
         spot_price = 80
-        risk = 0.15 if self.model.weather_shock < 0 else 0.05
-        return spot_price * expected_yield * (1 - risk)
+        
+        # Differentiated behavior based on persona
+        risk_tolerance = 0.05 if self.is_speculator else 0.20
+        bid_multiplier = 1.3 if self.is_speculator else 0.9
+        
+        # Perceived risk depends on model's current weather shock
+        # Speculators are less sensitive to immediate bad weather shocks
+        perceived_risk = (0.15 if self.model.weather_shock < 0 else 0.05) * (1 - risk_tolerance)
+        
+        valuation = spot_price * expected_yield * (1 - perceived_risk)
+        return valuation * bid_multiplier
 
     def step(self):
         # Look at available offers
@@ -99,6 +116,9 @@ class SimpleAgriModel(mesa.Model):
         )
 
     def step(self):
+        # Weather shock varies each step (representing seasonal volatility)
+        self.weather_shock = random.gauss(0, 0.15) 
+        
         self.agents.shuffle_do("step")
         self.datacollector.collect(self)
 
