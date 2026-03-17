@@ -90,12 +90,39 @@ class Farmer(mesa.Agent):
         self.bank_delay_remaining = 0
 
     def step(self):
-        offered_plots = [o["plot"] for o in self.model.offers]
-        reserved_plots = [p for p in self.plots if p.reserved_by is not None]
-        available = [p for p in self.plots if p.reserved_by is None and p not in offered_plots]
+        phase = self.model.phase
 
-        utilization = len(reserved_plots) / len(self.plots)
+        if phase == PHASE_HARVEST:
+            self._settle_harvest()
+            return
 
+        if phase == PHASE_BANK:
+            self.bank_delay_remaining -= 1
+            if self.model.verbose:
+                print(f"  [Farmer] Bank processing... {self.bank_delay_remaining} steps left")
+            if self.bank_delay_remaining <= 0:
+                self.model.phase = PHASE_PRIMARY
+            return
+
+        if phase != PHASE_PRIMARY:
+            return
+
+        offered_ids  = {o["plot"].unique_id for o in self.model.auction_queue}
+        reserved     = [p for p in self.plots if p.reserved_by is not None]
+        available    = [p for p in self.plots
+                        if p.reserved_by is None and p.unique_id not in offered_ids]
+        utilization  = len(reserved) / len(self.plots)
+
+        # Enter bank phase when utilization hits 80 %
+        if utilization >= 0.8 and available:
+            self.model.phase = PHASE_BANK
+            self.bank_delay_remaining = random.randint(8, 15)
+            if self.model.verbose:
+                print(f"  [Farmer] Util={utilization:.0%} — entering bank processing "
+                      f"({self.bank_delay_remaining} steps)")
+            return
+
+        # List one plot with probability 0.3
         if available and random.random() < 0.3:
             plot = random.choice(available)
             base_price = 450 + (utilization * 300)
