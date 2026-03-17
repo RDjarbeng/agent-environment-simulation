@@ -15,27 +15,31 @@ This is an early prototype inspired by the idea of investors prepaying for fract
 - **Seasonal Volatility**: A `weather_shock` varies each step (representing weeks/seasons), affecting how investors value future yields.
 - **Valuation Formula**:
   ```
-  value = spot_price × expected_yield × (1 - risk)
+  value = (spot_price × expected_yield × (1 - perceived_risk)) * bid_multiplier
   ```
-  - `expected_yield = 10` (tons/plot, placeholder)
-  - `spot_price = 80` ($/ton, placeholder)
-  - `risk = 0.15` or `0.05` depending on weather shock
-- If valuation > price and investor has capital, they buy the contract (reserve the plot).
-- Each investor attempts to buy **at most one plot per step**.
-- Offers are removed once accepted.
-- Basic utilization tracked and printed every step (fraction of plots reserved).
-- Runs for 120 steps (~multiple growing seasons if each step ≈ 1 week).
+- **Primary Market Logic**: Farmer offers plots; investors evaluate, purchase if price < valuation, and remove offers from the queue.
+- **Mesa 3.5.1 Optimized**: Uses the latest `AgentSet` and model-based agent management patterns.
 
-**Current output example**:
-```
-Step 0: Utilization 0.00
-Farmer offers plot 7 for $523
-Investor 112 bought plot 7 for $523 (Valuation: $680.00)
-Step 1: Utilization 0.06
-...
-```
+## Information Effects Research (Core Hypothesis)
 
-Utilization rises over time until most/all plots are reserved.
+We are testing the hypothesis that **information symmetry significantly impacts market stability and price convergence.**
+
+### Information Tiers
+
+| Tier | What the agent knows | Behavioral Implementation |
+|---|---|---|
+| **Blind** | Only current offer price | Base logic (greedy purchasing) |
+| **Local** | Their own trade history | Anchoring to their personally paid average |
+| **Market** | Average recent trade prices | Values tied to `model.public_price_index` |
+| **Full** | All holdings & valuations | Bidding up based on observed competitor interest |
+
+**Hypothesis**: *Market volatility will decrease but wealth concentration (Gini coefficient) will increase as information availability moves from Blind to Market tiers.*
+
+## Secondary Market (Milestone 2)
+
+A sketch of the upcoming secondary trading logic:
+- **Speculator Flip**: Speculators will list holdings for sale (secondary offers) when market price > cost basis + premium.
+- **Secondary Discovery**: Other investors will scan secondary offers if the primary farmer is "sold out" or has no active offers.
 
 ## Why Mesa 3.5.1 Required These Changes
 
