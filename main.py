@@ -368,10 +368,22 @@ class SimpleAgriModel(mesa.Model):
             self.price_manager.record_bids(plot.unique_id, len(bids))
 
             if bids:
-                # Highest bid wins
-                winner_bid = max(bids, key=lambda b: b["amount"])
-                winner     = winner_bid["investor"]
-                price      = winner_bid["amount"]
+                # ── Tiebreaker logic ─────────────────────────────
+                # Primary sort: highest bid amount.
+                # Tiebreaker 1: fewest current holdings (give scarce plots to
+                #   investors who hold less — prevents monopoly).
+                # Tiebreaker 2: random (already baked in via shuffle_do order,
+                #   but we add an explicit random key to be deterministic).
+                winner_bid = max(
+                    bids,
+                    key=lambda b: (
+                        b["amount"],
+                        -b["holdings"],          # fewer holdings → higher priority
+                        random.random(),         # final random tiebreak
+                    ),
+                )
+                winner = winner_bid["investor"]
+                price  = winner_bid["amount"]
 
                 if winner.capital >= price:
                     # Execute trade
