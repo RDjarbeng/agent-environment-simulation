@@ -4,6 +4,30 @@
 
 This is an early prototype inspired by the idea of investors prepaying for fractions of a farm's future produce (like tech companies prepaying for RAM), with the goal of eventually simulating secondary trading of contracts when the farm is "sold out" and expansion loans are delayed.
 
+```mermaid
+flowchart TD
+    WS["🌦 weather_shock\ngauss(0, 0.15) per step"]
+
+    subgraph Model["SimpleAgriModel — 120 steps"]
+        Farmer["Farmer\ncapital · plots[]\ndynamic pricing"]
+        Offers[("offers[]\nplot · price")]
+        Plots["Plot ×16\nreserved_by · contract_price"]
+        Spec["Speculator\n$20k · risk 0.05 · bid ×1.3"]
+        Cons["Conservative\n$15k · risk 0.20 · bid ×0.9"]
+        DC["DataCollector\nUtilization per step"]
+    end
+
+    WS -->|influences risk| Spec
+    WS -->|influences risk| Cons
+    Farmer -->|post offer| Offers
+    Farmer -->|owns| Plots
+    Offers -->|evaluate| Spec
+    Offers -->|evaluate| Cons
+    Spec -.->|reserve plot| Plots
+    Cons -.->|reserve plot| Plots
+    Plots -->|utilization| DC
+```
+
 ## Current Features (v0.2 – Advanced Primary Market)
 
 - **Dynamic Farmer Pricing**: The farmer now raises prices as utilization (pre-sold plots) increases, simulating price discovery pressure.
