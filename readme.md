@@ -203,6 +203,6 @@ Next realistic steps toward more interesting behavior:
 
 ## License
 
-MIT – feel free to fork & extend.
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 Happy modeling!
