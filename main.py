@@ -12,42 +12,34 @@ from collections import defaultdict
 #   "full"   – market info + awareness of how many others are bidding
 # ─────────────────────────────────────────────────────────────────
 
-# ── MODEL PHASES ─────────────────────────────────────────────────
-PHASE_PRIMARY   = "primary"    # farmer listing plots, investors buying
-PHASE_BANK      = "bank"       # utilization >= 0.8, farmer waiting on loan
-PHASE_SECONDARY = "secondary"  # primary sold out, only resale trades
-PHASE_HARVEST   = "harvest"    # end of season, contracts settled
+PHASE_PRIMARY   = "primary"
+PHASE_BANK      = "bank"
+PHASE_SECONDARY = "secondary"
+PHASE_HARVEST   = "harvest"
 
 
 # ─────────────────────────────────────────────────────────────────
-#  PRICE MANAGER  (plain class, not a Mesa agent)
-#  Owns all ask-price logic so Farmer can focus on farming.
+#  PRICE MANAGER
 # ─────────────────────────────────────────────────────────────────
 
 class PriceManager:
     def __init__(self, base_price=450, utilization_premium=300, stale_discount=0.97):
-        self.base_price = base_price
-        self.utilization_premium = utilization_premium
-        self.stale_discount = stale_discount
-        self.bid_counts   = defaultdict(int)   # plot_id → bids received last step
-        self.steps_listed = defaultdict(int)   # plot_id → steps on market unsold
+        self.base_price           = base_price
+        self.utilization_premium  = utilization_premium
+        self.stale_discount       = stale_discount
+        self.bid_counts           = defaultdict(int)   # plot_id → bids last step
+        self.steps_listed         = defaultdict(int)   # plot_id → steps on market
 
     def compute_ask(self, plot, utilization):
-        """Calculate ask price for a newly listed plot."""
         base = self.base_price + (utilization * self.utilization_premium)
-
-        # Bid pressure from previous step: raise ask if multiple bidders competed
         pressure = self.bid_counts.get(plot.unique_id, 0)
         if pressure >= 3:
             base *= 1.10
         elif pressure == 2:
             base *= 1.05
-
-        # Staleness discount: lower ask if plot has sat unsold
         stale = self.steps_listed.get(plot.unique_id, 0)
         if stale > 5:
             base *= self.stale_discount ** (stale - 5)
-
         return int(base + random.randint(-20, 20))
 
     def record_bids(self, plot_id, count):
@@ -68,26 +60,26 @@ class PriceManager:
 class Plot(mesa.Agent):
     def __init__(self, model, unique_id, crop="tomato"):
         super().__init__(model)
-        self.unique_id    = unique_id
-        self.crop         = crop
-        self.reserved_by  = None   # investor unique_id who holds contract
+        self.unique_id      = unique_id
+        self.crop           = crop
+        self.reserved_by    = None
         self.contract_price = 0.0
-        self.harvest_paid = False
+        self.harvest_paid   = False
 
     def step(self):
         pass
 
 
 # ─────────────────────────────────────────────────────────────────
-#  FARMER  — only does farm things; pricing delegated to PriceManager
+#  FARMER
 # ─────────────────────────────────────────────────────────────────
 
 class Farmer(mesa.Agent):
     def __init__(self, model, unique_id=0):
         super().__init__(model)
-        self.unique_id = unique_id
-        self.capital   = 10000
-        self.plots     = []
+        self.unique_id            = unique_id
+        self.capital              = 10000
+        self.plots                = []
         self.bank_delay_remaining = 0
 
     def step(self):
@@ -105,56 +97,53 @@ class Farmer(mesa.Agent):
                 self.model.phase = PHASE_PRIMARY
             return
 
-        if phase != PHASE_PRIMARY:
+        if phase not in (PHASE_PRIMARY, PHASE_SECONDARY):
             return
 
-        offered_ids  = {o["plot"].unique_id for o in self.model.auction_queue}
-        reserved     = [p for p in self.plots if p.reserved_by is not None]
-        available    = [p for p in self.plots
-                        if p.reserved_by is None and p.unique_id not in offered_ids]
-        utilization  = len(reserved) / len(self.plots)
+        offered_ids = {o["plot"].unique_id for o in self.model.auction_queue}
+        reserved    = [p for p in self.plots if p.reserved_by is not None]
+        available   = [p for p in self.plots
+                       if p.reserved_by is None and p.unique_id not in offered_ids]
+        utilization = len(reserved) / len(self.plots)
 
-        # Enter bank phase when utilization hits 80 %
-        if utilization >= 0.8 and available:
-            self.model.phase = PHASE_BANK
-            self.bank_delay_remaining = random.randint(8, 15)
+        # Enter bank phase at 80% — but only if there are still plots left to sell
+        # Use a short fixed delay so it always completes within a 120-step run
+        if utilization >= 0.8 and available and phase == PHASE_PRIMARY:
+            self.model.phase              = PHASE_BANK
+            self.bank_delay_remaining     = random.randint(3, 6)   # short: 3–6 steps
             if self.model.verbose:
-                print(f"  [Farmer] Util={utilization:.0%} — entering bank processing "
+                print(f"  [Farmer] Util={utilization:.0%} → bank processing "
                       f"({self.bank_delay_remaining} steps)")
             return
 
-        # List one plot with probability 0.3
         if available and random.random() < 0.3:
             plot  = random.choice(available)
             price = self.model.price_manager.compute_ask(plot, utilization)
             self.model.auction_queue.append({
-                "plot":      plot,
-                "ask":       price,
-                "bids":      [],   # list of {"investor": inv, "amount": float}
+                "plot":       plot,
+                "ask":        price,
+                "bids":       [],
                 "steps_open": 0,
-                "source":    "primary",
+                "source":     "primary",
             })
             if self.model.verbose:
                 print(f"  [Farmer] Lists plot {plot.unique_id} @ ${price} "
                       f"(util={utilization:.0%})")
 
     def _settle_harvest(self):
-        """Pay out contract holders based on yield × weather."""
-        season_yield  = 10 * (1 + self.model.weather_shock)   # tons/plot
-        spot_price    = 80
-        payout_per_plot = max(0, season_yield * spot_price)
+        season_yield    = 10 * (1 + self.model.weather_shock)
+        payout_per_plot = max(0.0, season_yield * 80)
 
         for plot in self.plots:
             if plot.reserved_by is not None and not plot.harvest_paid:
-                # Find the investor who holds this contract
                 holder = next(
                     (a for a in self.model.agents
                      if isinstance(a, Investor) and a.unique_id == plot.reserved_by),
-                    None
+                    None,
                 )
                 if holder:
-                    holder.capital += payout_per_plot
-                    self.capital   -= payout_per_plot
+                    holder.capital   += payout_per_plot
+                    self.capital     -= payout_per_plot
                     plot.harvest_paid = True
                     self.model.trade_log.append({
                         "step":        self.model.current_step,
@@ -163,11 +152,13 @@ class Farmer(mesa.Agent):
                         "plot":        plot.unique_id,
                         "amount":      payout_per_plot,
                         "info_level":  holder.information_level,
+                        "n_bidders":   0,
+                        "source":      "harvest",
                     })
 
         if self.model.verbose:
-            print(f"  [Farmer] Harvest: yield={season_yield:.1f}t/plot, "
-                  f"payout/plot=${payout_per_plot:.0f}")
+            print(f"  [Farmer] Harvest settled: "
+                  f"yield={season_yield:.1f}t/plot, payout/plot=${payout_per_plot:.0f}")
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -177,25 +168,21 @@ class Farmer(mesa.Agent):
 class Investor(mesa.Agent):
     def __init__(self, model, unique_id, is_speculator=True, information_level="blind"):
         super().__init__(model)
-        self.unique_id        = unique_id
-        self.capital          = 20000 if is_speculator else 15000
-        self.is_speculator    = is_speculator
+        self.unique_id         = unique_id
+        self.capital           = 20000 if is_speculator else 15000
+        self.is_speculator     = is_speculator
         self.information_level = information_level
-        self.holdings         = []   # Plot objects
-        self.price_memory     = []   # own past trade prices  (local tier)
-
-    # ── Valuation ────────────────────────────────────────────────
+        self.holdings          = []
+        self.price_memory      = []
 
     def value_contract(self, plot, ask):
-        expected_yield = 10
-        spot_price     = 80
-
+        expected_yield  = 10
+        spot_price      = 80
         risk_tolerance  = 0.05 if self.is_speculator else 0.20
         bid_multiplier  = 1.3  if self.is_speculator else 0.9
         perceived_risk  = (0.15 if self.model.weather_shock < 0 else 0.05) * (1 - risk_tolerance)
         base_value      = spot_price * expected_yield * (1 - perceived_risk)
 
-        # ── Information tier adjustments ─────────────────────────
         if self.information_level == "local" and self.price_memory:
             avg_paid   = sum(self.price_memory) / len(self.price_memory)
             base_value = 0.6 * base_value + 0.4 * (avg_paid * 1.1)
@@ -205,76 +192,67 @@ class Investor(mesa.Agent):
                 base_value = 0.5 * base_value + 0.5 * (self.model.public_price_index * 1.1)
 
         elif self.information_level == "full":
-            # Know how many other bids are already on this lot
-            existing_bids = len([
-                e for e in self.model.auction_queue
+            existing_bids = sum(
+                1 for e in self.model.auction_queue
                 if e["plot"].unique_id == plot.unique_id
-            ])
+            )
             base_value = base_value * (1 + 0.05 * existing_bids)
             if self.model.public_price_index is not None:
                 base_value = 0.5 * base_value + 0.5 * (self.model.public_price_index * 1.1)
 
         return base_value * bid_multiplier
 
-    # ── Step ─────────────────────────────────────────────────────
-
     def step(self):
-        phase = self.model.phase
-
-        # Primary or secondary: bid on open auction lots
-        if phase in (PHASE_PRIMARY, PHASE_BANK, PHASE_SECONDARY):
+        if self.model.phase in (PHASE_PRIMARY, PHASE_BANK, PHASE_SECONDARY):
             self._bid_on_lots()
 
-        # Speculators can relist holdings when secondary market is active
-        if phase == PHASE_SECONDARY and self.is_speculator:
+        # Speculators relist once secondary market is active
+        if self.model.phase == PHASE_SECONDARY and self.is_speculator:
             self._try_relist()
 
     def _bid_on_lots(self):
-        """Submit at most one bid per step on the most attractive open lot."""
         best       = None
         best_score = 0.0
 
         for entry in self.model.auction_queue:
             plot = entry["plot"]
             ask  = entry["ask"]
-
             if plot.reserved_by is not None:
                 continue
-            # Don't bid on something you already hold
             if plot in self.holdings:
                 continue
-            # Don't double-bid on same plot
             if any(b["investor"] is self for b in entry["bids"]):
                 continue
 
             valuation = self.value_contract(plot, ask)
-            score     = valuation - ask   # surplus
+            score     = valuation - ask
             if valuation > ask and self.capital >= ask and score > best_score:
                 best       = entry
                 best_score = score
 
         if best is not None:
-            bid_amount = self._bid_amount(best["ask"])
-            best["bids"].append({"investor": self, "amount": bid_amount})
+            bid_amount = self._shade_bid(best["ask"])
+            best["bids"].append({
+                "investor":    self,
+                "amount":      bid_amount,
+                "holdings":    len(self.holdings),   # used as tiebreaker
+            })
             if self.model.verbose:
-                print(f"  [Inv {self.unique_id}] bids ${bid_amount:.0f} on "
-                      f"plot {best['plot'].unique_id} (ask=${best['ask']})")
+                print(f"  [Inv {self.unique_id}] bids ${bid_amount:.0f} "
+                      f"on plot {best['plot'].unique_id} (ask=${best['ask']})")
 
-    def _bid_amount(self, ask):
-        """Speculators shade up, conservatives shade to ask."""
+    def _shade_bid(self, ask):
         if self.is_speculator:
             return ask * random.uniform(1.01, 1.10)
         return ask * random.uniform(1.00, 1.03)
 
     def _try_relist(self):
-        """Relist a holding if market price > cost basis + 15 % profit target."""
         idx = self.model.public_price_index
         if idx is None:
             return
         for plot in self.holdings[:]:
             if idx > plot.contract_price * 1.15:
-                ask = int(idx * random.uniform(0.95, 1.05))
-                # Only relist if not already in queue
+                ask     = int(idx * random.uniform(0.95, 1.05))
                 already = any(e["plot"] is plot for e in self.model.auction_queue)
                 if not already:
                     self.model.auction_queue.append({
@@ -288,7 +266,7 @@ class Investor(mesa.Agent):
                     if self.model.verbose:
                         print(f"  [Inv {self.unique_id}] relists plot "
                               f"{plot.unique_id} @ ${ask}")
-                break   # relist at most one per step
+                break
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -297,13 +275,13 @@ class Investor(mesa.Agent):
 
 class SimpleAgriModel(mesa.Model):
     def __init__(self, num_investors=20, num_plots=16,
-                 information_level="blind", harvest_step=100,
+                 information_level="blind", harvest_step=110,
                  seed=None, verbose=True):
         super().__init__(seed=seed)
 
         self.weather_shock      = random.gauss(0, 0.15)
-        self.auction_queue      = []   # open lots: {plot, ask, bids[], steps_open, source}
-        self.price_history      = []   # all winning trade prices
+        self.auction_queue      = []
+        self.price_history      = []
         self.public_price_index = None
         self.trade_log          = []
         self.current_step       = 0
@@ -313,15 +291,12 @@ class SimpleAgriModel(mesa.Model):
         self.phase              = PHASE_PRIMARY
         self.price_manager      = PriceManager()
 
-        # Create farmer (submits plots to auction_queue)
         self.farmer = Farmer(self, unique_id=0)
 
-        # Create plots
         for i in range(num_plots):
             plot = Plot(self, unique_id=i + 1)
             self.farmer.plots.append(plot)
 
-        # Create investors
         for i in range(num_investors):
             Investor(
                 self,
@@ -332,35 +307,28 @@ class SimpleAgriModel(mesa.Model):
 
         self.datacollector = mesa.DataCollector(
             model_reporters={
-                "Utilization":       lambda m: sum(
+                "Utilization":      lambda m: sum(
                     1 for p in m.farmer.plots if p.reserved_by is not None
                 ) / len(m.farmer.plots),
-                "PublicPriceIndex":  lambda m: m.public_price_index or 0,
-                "OpenLots":          lambda m: len(m.auction_queue),
-                "Phase":             lambda m: m.phase,
+                "PublicPriceIndex": lambda m: m.public_price_index or 0,
+                "OpenLots":         lambda m: len(m.auction_queue),
+                "Phase":            lambda m: m.phase,
             }
         )
 
     # ── Auction resolution ───────────────────────────────────────
 
     def _resolve_auctions(self):
-        """
-        For every open lot:
-          - Tick staleness counter
-          - If bids received: highest bid wins, price_manager gets feedback
-          - If no bids and lot is stale (>8 steps): remove from queue
-        """
         remaining = []
         for entry in self.auction_queue:
-            plot      = entry["plot"]
-            ask       = entry["ask"]
-            bids      = entry["bids"]
-            source    = entry["source"]
+            plot   = entry["plot"]
+            ask    = entry["ask"]
+            bids   = entry["bids"]
+            source = entry["source"]
 
             entry["steps_open"] += 1
             self.price_manager.tick_listed(plot.unique_id)
 
-            # Skip already-reserved plots (race condition guard)
             if plot.reserved_by is not None:
                 self.price_manager.sold(plot.unique_id)
                 continue
@@ -386,19 +354,17 @@ class SimpleAgriModel(mesa.Model):
                 price  = winner_bid["amount"]
 
                 if winner.capital >= price:
-                    # Execute trade
                     winner.capital          -= price
                     winner.holdings.append(plot)
                     winner.price_memory.append(price)
-                    self.farmer.capital     += price
 
-                    # If secondary sale: seller gets proceeds, loses holding
                     if source == "secondary" and "seller" in entry:
                         seller = entry["seller"]
                         seller.capital += price
-                        self.farmer.capital -= price   # net zero through farmer
                         if plot in seller.holdings:
                             seller.holdings.remove(plot)
+                    else:
+                        self.farmer.capital += price
 
                     plot.reserved_by    = winner.unique_id
                     plot.contract_price = price
@@ -406,27 +372,26 @@ class SimpleAgriModel(mesa.Model):
                     self.price_manager.sold(plot.unique_id)
 
                     self.trade_log.append({
-                        "step":        self.current_step,
-                        "event":       "trade",
-                        "investor":    winner.unique_id,
-                        "plot":        plot.unique_id,
-                        "price":       price,
-                        "ask":         ask,
-                        "n_bidders":   len(bids),
+                        "step":          self.current_step,
+                        "event":         "trade",
+                        "investor":      winner.unique_id,
+                        "plot":          plot.unique_id,
+                        "price":         price,
+                        "ask":           ask,
+                        "n_bidders":     len(bids),
                         "is_speculator": winner.is_speculator,
-                        "info_level":  winner.information_level,
-                        "source":      source,
+                        "info_level":    winner.information_level,
+                        "source":        source,
                     })
 
                     if self.verbose:
+                        contested = f" [{len(bids)} bidders]" if len(bids) > 1 else ""
                         print(f"  [Auction] Plot {plot.unique_id} → "
-                              f"Inv {winner.unique_id} @ ${price:.0f} "
-                              f"({len(bids)} bidder{'s' if len(bids)>1 else ''})")
-                    continue   # don't keep in queue
+                              f"Inv {winner.unique_id} @ ${price:.0f}{contested}")
+                    continue
 
-            # No winning bid — keep if not too stale
             if entry["steps_open"] <= 8:
-                entry["bids"] = []   # reset bids for next step
+                entry["bids"] = []
                 remaining.append(entry)
             else:
                 if self.verbose:
@@ -443,17 +408,15 @@ class SimpleAgriModel(mesa.Model):
 
         if self.current_step >= self.harvest_step:
             self.phase = PHASE_HARVEST
-
         elif self.phase == PHASE_PRIMARY and util >= 1.0:
             self.phase = PHASE_SECONDARY
 
     # ── Main step ────────────────────────────────────────────────
 
     def step(self):
-        self.current_step  += 1
-        self.weather_shock  = random.gauss(0, 0.15)
+        self.current_step += 1
+        self.weather_shock = random.gauss(0, 0.15)
 
-        # Rolling public price index (last 10 trades)
         if self.price_history:
             self.public_price_index = (
                 sum(self.price_history[-10:]) / len(self.price_history[-10:])
@@ -485,7 +448,7 @@ def compute_run_metrics(model, steps):
 
     trades = [t for t in model.trade_log if t["event"] == "trade"]
     if trades:
-        prices         = [t["price"] for t in trades]
+        prices           = [t["price"] for t in trades]
         price_volatility = float(np.std(prices))
         avg_trade_price  = float(np.mean(prices))
         contested        = sum(1 for t in trades if t["n_bidders"] > 1)
@@ -500,25 +463,23 @@ def compute_run_metrics(model, steps):
     spec_holdings   = sum(len(inv.holdings) for inv in investors if inv.is_speculator)
     cons_holdings   = sum(len(inv.holdings) for inv in investors if not inv.is_speculator)
 
-    total_cash = (
-        model.farmer.capital
-        + sum(a.capital for a in model.agents if isinstance(a, Investor))
-    )
+    inv_cash   = sum(a.capital for a in model.agents if isinstance(a, Investor))
+    total_cash = model.farmer.capital + inv_cash
 
     return {
-        "time_to_saturation":  time_to_saturation,
-        "final_utilization":   float(df["Utilization"].iloc[-1]),
-        "price_volatility":    price_volatility,
-        "avg_trade_price":     avg_trade_price,
-        "gini_holdings":       gini,
-        "speculator_holdings": spec_holdings,
+        "time_to_saturation":    time_to_saturation,
+        "final_utilization":     float(df["Utilization"].iloc[-1]),
+        "price_volatility":      price_volatility,
+        "avg_trade_price":       avg_trade_price,
+        "gini_holdings":         gini,
+        "speculator_holdings":   spec_holdings,
         "conservative_holdings": cons_holdings,
-        "num_trades":          len(trades),
-        "contested_trades":    contested,
-        "avg_bidders":         avg_bidders,
-        "secondary_trades":    secondary_trades,
-        "total_cash":          total_cash,
-        "farmer_capital":      model.farmer.capital,
+        "num_trades":            len(trades),
+        "contested_trades":      contested,
+        "avg_bidders":           avg_bidders,
+        "secondary_trades":      secondary_trades,
+        "total_cash":            total_cash,
+        "farmer_capital":        model.farmer.capital,
     }
 
 
@@ -593,10 +554,11 @@ def print_mc_summary(df):
 # ─────────────────────────────────────────────────────────────────
 
 def print_environment_state(model, label=""):
-    df      = model.datacollector.get_model_vars_dataframe()
-    util    = df["Utilization"].iloc[-1] if not df.empty else 0.0
+    df       = model.datacollector.get_model_vars_dataframe()
+    util     = df["Utilization"].iloc[-1] if not df.empty else 0.0
     reserved = sum(1 for p in model.farmer.plots if p.reserved_by is not None)
     inv_cash = sum(a.capital for a in model.agents if isinstance(a, Investor))
+    trades   = [t for t in model.trade_log if t["event"] == "trade"]
 
     print(f"\n=== {label} ===")
     print(f"Step:                  {model.current_step}")
@@ -607,12 +569,9 @@ def print_environment_state(model, label=""):
     print(f"Reserved plots:        {reserved}")
     print(f"Utilization:           {util:.1%}")
     print(f"Open auction lots:     {len(model.auction_queue)}")
-    trades = [t for t in model.trade_log if t['event'] == 'trade']
     print(f"Total trades:          {len(trades)}")
-    contested = sum(1 for t in trades if t['n_bidders'] > 1)
-    print(f"Contested trades:      {contested}")
-    secondary = sum(1 for t in trades if t['source'] == 'secondary')
-    print(f"Secondary trades:      {secondary}")
+    print(f"Contested trades:      {sum(1 for t in trades if t['n_bidders'] > 1)}")
+    print(f"Secondary trades:      {sum(1 for t in trades if t['source'] == 'secondary')}")
     print(f"Total cash in economy: ${model.farmer.capital + inv_cash:,.0f}")
     print(f"Farmer capital:        ${model.farmer.capital:,.0f}")
     print(f"Investor cash sum:     ${inv_cash:,.0f}")
@@ -635,19 +594,21 @@ def run_simple_sim(steps=120, information_level="blind"):
         util = df["Utilization"].iloc[-1] if not df.empty else 0.0
         results.append({"step": t, "utilization": util, "phase": model.phase})
         if t % 20 == 0 or t == steps - 1:
-            print(f"Step {t}: Utilization {util:.2f}  Phase={model.phase}")
+            print(f"Step {t:>3}: Utilization {util:.2f}  [{model.phase}]")
 
     print_environment_state(model, "FINAL SIMULATION STATE")
     return pd.DataFrame(results)
 
 
 # ─────────────────────────────────────────────────────────────────
-#  TIER COMPARISON
+#  TIER COMPARISON  (one run per tier)
 # ─────────────────────────────────────────────────────────────────
 
 def run_comparison(steps=120):
     results = {}
-    for level in ("blind", "local", "market", "full"):
+    tiers   = ("blind", "local", "market", "full")
+
+    for level in tiers:
         print(f"Running tier: {level}...")
         model = SimpleAgriModel(information_level=level, verbose=False)
         model.datacollector.collect(model)
@@ -682,7 +643,7 @@ def run_monte_carlo(info_levels=("blind", "local", "market", "full"),
             model.datacollector.collect(model)
             for _ in range(steps):
                 model.step()
-            metrics              = compute_run_metrics(model, steps)
+            metrics               = compute_run_metrics(model, steps)
             metrics["info_level"] = info_level
             metrics["run"]        = run
             all_results.append(metrics)
@@ -690,18 +651,10 @@ def run_monte_carlo(info_levels=("blind", "local", "market", "full"),
                 print(f"  Completed {run + 1}/{n_runs} runs")
 
     df = pd.DataFrame(all_results)
-
-    print("\n=== MONTE CARLO SUMMARY (mean ± std) ===")
-    summary_cols = [
-        "time_to_saturation", "price_volatility", "avg_trade_price",
-        "gini_holdings", "speculator_holdings", "conservative_holdings",
-        "contested_trades", "avg_bidders", "secondary_trades",
-    ]
-    summary = df.groupby("info_level")[summary_cols].agg(["mean", "std"]).round(2)
-    print(summary.to_string())
+    print_mc_summary(df)
 
     df.to_csv("monte_carlo_results.csv", index=False)
-    print("\nResults saved to monte_carlo_results.csv")
+    print("Results saved to monte_carlo_results.csv")
     return df
 
 
@@ -722,7 +675,7 @@ if __name__ == "__main__":
         run_comparison(steps=120)
 
     else:
-        # python main.py               → blind single run
+        # python main.py               → blind, single run
         # python main.py single market → market tier
         level = sys.argv[2] if len(sys.argv) > 2 else "blind"
         run_simple_sim(steps=120, information_level=level)
