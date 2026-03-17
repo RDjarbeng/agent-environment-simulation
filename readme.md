@@ -109,6 +109,89 @@ numpy
 # optional for viz later: streamlit altair
 ```
 
+## Agents- Current state of the simulation
+
+### What is an "agent" in this simulation right now?
+
+In your current code, an **agent** is:
+
+- A Python class that inherits from `mesa.Agent`
+- Has its own internal state (variables) — examples:  
+  - `capital` (how much money it has)  
+  - `holdings` (list of plots it owns contracts for)  
+  - `is_speculator` (true/false flag)  
+  - `unique_id` (its identifier)
+- Has a `step()` method that is called once per simulation step
+
+**Right now, agents do NOT think.**  
+They follow **simple, deterministic or probabilistic predefined rules** written in their `step()` method.
+
+Current investor behavior (very simplified):
+
+```python
+def step(self):
+    random.shuffle(self.model.offers)
+    for offer in self.model.offers[:]:
+        if plot already taken: skip
+        valuation = self.value_contract(plot)          # fixed formula
+        if valuation > price and I have enough money:
+            buy it
+            remove offer
+            break  # only buy one per step
+```
+
+→ This is **rule-based / scripted behavior**, not thinking.  
+There is no planning, no memory of past trades (except holdings), no learning, no looking multiple steps ahead, no negotiation, no reading other agents' intentions.
+
+**Summary – current level of "intelligence"**
+
+| Aspect                  | Current status                          | Level of "thinking"      |
+|-------------------------|------------------------------------------|---------------------------|
+| Decision making         | Fixed if-then rules + random shuffle    | None – purely reactive   |
+| Memory                  | Only current holdings + capital         | Very minimal             |
+| Learning / adaptation   | None                                    | Zero                     |
+| Looking ahead           | None (only values current offers)       | Zero                     |
+| Social awareness        | None (doesn't see what others do)       | Zero                     |
+| Strategy variation      | Only via `is_speculator` flag (affects starting capital) | Very weak               |
+
+They are **automata** — not thinking entities.
+
+### What currently differentiates one investor from another?
+
+Very little — only two differences exist right now:
+
+1. **Starting capital**  
+   - Speculators: $20,000  
+   - Non-speculators: $15,000
+
+2. **The `is_speculator` boolean flag**  
+   (currently only used to set capital — no other behavioral difference)
+
+Everything else is **identical**:
+
+- Same valuation formula
+- Same buying logic (greedy: buy first good deal they see after shuffle)
+- Same risk perception
+- Same one-purchase-per-step limit
+
+→ Investors are **almost homogeneous** except for starting money.
+
+
+### Summary – current agents vs future potential
+
+Right now:  
+→ Agents = **simple rule-following robots** with almost no differentiation  
+→ No real thinking, no memory of past, no strategy, no learning
+
+Next realistic steps toward more interesting behavior:
+
+- Add memory (past prices seen, average price paid)
+- Add types/strategies (greedy, patient, momentum follower, contrarian)
+- Add selling logic (secondary market)
+- Add simple goals / utility functions that vary between agents
+- (much later) reinforcement learning or simple genetic algorithm adaptation
+
+
 ## License
 
 MIT – feel free to fork & extend.
