@@ -67,24 +67,27 @@ class PriceManager:
 class Plot(mesa.Agent):
     def __init__(self, model, unique_id, crop="tomato"):
         super().__init__(model)
-        self.unique_id = unique_id
-        self.crop = crop
-        self.reserved_by = None
+        self.unique_id    = unique_id
+        self.crop         = crop
+        self.reserved_by  = None   # investor unique_id who holds contract
         self.contract_price = 0.0
-        self.current_value = 0.0
-        self.interested_investors = []  # used by "full" tier
+        self.harvest_paid = False
 
     def step(self):
-        self.interested_investors = []  # reset each step
+        pass
 
+
+# ─────────────────────────────────────────────────────────────────
+#  FARMER  — only does farm things; pricing delegated to PriceManager
+# ─────────────────────────────────────────────────────────────────
 
 class Farmer(mesa.Agent):
     def __init__(self, model, unique_id=0):
         super().__init__(model)
         self.unique_id = unique_id
-        self.capital = 10000
-        self.plots = []
-        self.utilization = 0.0
+        self.capital   = 10000
+        self.plots     = []
+        self.bank_delay_remaining = 0
 
     def step(self):
         offered_plots = [o["plot"] for o in self.model.offers]
