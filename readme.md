@@ -54,6 +54,7 @@ We are testing the hypothesis that **information symmetry significantly impacts 
 | **Full** | All holdings & valuations | Bidding up based on observed competitor interest |
 
 **Hypothesis**: *Market volatility will decrease but wealth concentration (Gini coefficient) will increase as information availability moves from Blind to Market tiers.*
+<img width="1410" height="1078" alt="image" src="https://github.com/user-attachments/assets/24f35675-6250-4a9e-a191-cd60a10c954f" />
 
 ## Secondary Market (Milestone 2)
 
