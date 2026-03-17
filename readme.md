@@ -90,6 +90,9 @@ for info_level in ["blind", "market", "full"]:
         # collect results
 ```
 
+### Tiebreaker
+Currently there's no explicit tiebreaker — max(bids, key=lambda b: b["amount"]) just returns the first maximum it finds in Python's list, which means whoever submitted their bid earlier in the shuffle wins. That's actually fine as a default (random activation order already shuffles agents), but a cleaner explicit rule would be: if amounts are equal, the investor with fewer current holdings wins (scarcity fairness).
+
 ## Secondary Market (Milestone 2)
 
 A sketch of the upcoming secondary trading logic:
