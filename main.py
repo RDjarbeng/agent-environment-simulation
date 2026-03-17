@@ -122,15 +122,44 @@ class SimpleAgriModel(mesa.Model):
         self.agents.shuffle_do("step")
         self.datacollector.collect(self)
 
+def print_environment_state(model, label=""):
+    print(f"\n=== {label} ===")
+    print(f"Step:                  {model.steps if hasattr(model, 'steps') else 'N/A'}")
+    print(f"Number of agents:      {len(model.agents)}")
+    print(f"Number of investors:   {sum(1 for a in model.agents if isinstance(a, Investor))}")
+    print(f"Number of plots:       {len(model.farmer.plots)}")
+    print(f"Reserved plots:        {sum(1 for p in model.farmer.plots if p.reserved_by is not None)}")
+    
+    df = model.datacollector.get_model_vars_dataframe()
+    util = df['Utilization'].iloc[-1] if not df.empty else 0.0
+    print(f"Utilization:           {util:.1%}")
+    print(f"Available offers:      {len(model.offers)}")
+
+    total_cash = model.farmer.capital + sum(a.capital for a in model.agents if isinstance(a, Investor))
+    print(f"Total cash in economy: ${total_cash:,.0f}")
+    print(f"Farmer capital:        ${model.farmer.capital:,.0f}")
+    print(f"Investor cash sum:     ${sum(a.capital for a in model.agents if isinstance(a, Investor)):,.0f}")
+    print("=====================\n")
+
 def run_simple_sim(steps=120):
     model = SimpleAgriModel()
+    
+    # Collect initial state
+    model.datacollector.collect(model)
+    print_environment_state(model, "INITIAL STATE")
+    
     results = []
     for t in range(steps):
         model.step()
         df = model.datacollector.get_model_vars_dataframe()
         util = df["Utilization"].iloc[-1] if not df.empty else 0.0
         results.append({"step": t, "utilization": util})
-        print(f"Step {t}: Utilization {util:.2f}")
+        
+        # Periodic status updates
+        if t % 20 == 0 or t == steps - 1:
+            print(f"Step {t}: Utilization {util:.2f}")
+            
+    print_environment_state(model, "FINAL SIMULATION STATE")
     return pd.DataFrame(results)
 
 if __name__ == "__main__":
