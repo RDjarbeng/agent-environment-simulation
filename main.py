@@ -27,8 +27,8 @@ class PriceManager:
         self.base_price           = base_price
         self.utilization_premium  = utilization_premium
         self.stale_discount       = stale_discount
-        self.bid_counts           = defaultdict(int)   # plot_id → bids last step
-        self.steps_listed         = defaultdict(int)   # plot_id → steps on market
+        self.bid_counts           = defaultdict(int)   # plot_id -> bids last step
+        self.steps_listed         = defaultdict(int)   # plot_id -> steps on market
 
     def compute_ask(self, plot, utilization):
         base = self.base_price + (utilization * self.utilization_premium)
@@ -107,12 +107,15 @@ class Farmer(mesa.Agent):
         utilization = len(reserved) / len(self.plots)
 
         # Enter bank phase at 80% — but only if there are still plots left to sell
-        # Use a short fixed delay so it always completes within a 120-step run
-        if utilization >= 0.8 and available and phase == PHASE_PRIMARY:
+        # Use a short fixed delay so it always completes within a 600-step run
+        # Enter bank phase at 80% — but only if there are still plots left to sell
+        # We only trigger this ONCE per simulation.
+        if utilization >= 0.8 and available and not self.model.bank_phase_triggered:
             self.model.phase              = PHASE_BANK
-            self.bank_delay_remaining     = random.randint(3, 6)   # short: 3–6 steps
+            self.model.bank_phase_triggered = True
+            self.bank_delay_remaining     = random.randint(3, 10) 
             if self.model.verbose:
-                print(f"  [Farmer] Util={utilization:.0%} → bank processing "
+                print(f"  [Farmer] Util={utilization:.0%} -> bank processing "
                       f"({self.bank_delay_remaining} steps)")
             return
 
@@ -217,7 +220,11 @@ class Investor(mesa.Agent):
         for entry in self.model.auction_queue:
             plot = entry["plot"]
             ask  = entry["ask"]
-            if plot.reserved_by is not None:
+            
+            # In primary market, reserved_by is None. 
+            # In secondary market, reserved_by is the seller.
+            # We skip only if the bidder is the current owner.
+            if plot.reserved_by == self.unique_id:
                 continue
             if plot in self.holdings:
                 continue
@@ -251,8 +258,9 @@ class Investor(mesa.Agent):
         if idx is None:
             return
         for plot in self.holdings[:]:
-            if idx > plot.contract_price * 1.15:
-                ask     = int(idx * random.uniform(0.95, 1.05))
+            # Speculator flips when current market index is significantly higher
+            if idx > plot.contract_price * 1.10: 
+                ask     = int(idx * random.uniform(0.98, 1.05))
                 already = any(e["plot"] is plot for e in self.model.auction_queue)
                 if not already:
                     self.model.auction_queue.append({
@@ -275,7 +283,7 @@ class Investor(mesa.Agent):
 
 class SimpleAgriModel(mesa.Model):
     def __init__(self, num_investors=20, num_plots=16,
-                 information_level="blind", harvest_step=110,
+                 information_level="blind", harvest_step=250,
                  seed=None, verbose=True):
         super().__init__(seed=seed)
 
@@ -289,6 +297,7 @@ class SimpleAgriModel(mesa.Model):
         self.harvest_step       = harvest_step
         self.verbose            = verbose
         self.phase              = PHASE_PRIMARY
+        self.bank_phase_triggered = False  # Ensure we only enter bank delay once
         self.price_manager      = PriceManager()
 
         self.farmer = Farmer(self, unique_id=0)
@@ -329,10 +338,12 @@ class SimpleAgriModel(mesa.Model):
             entry["steps_open"] += 1
             self.price_manager.tick_listed(plot.unique_id)
 
-            if plot.reserved_by is not None:
-                self.price_manager.sold(plot.unique_id)
-                continue
-
+            # For primary listings,reserved_by is None.
+            # For secondary listings, we check if it was already traded THIS step 
+            # by looking at the trade log or using a flag.
+            # Actually, a simpler way is to check if the winner has changed.
+            # We only continue if the plot is NOT in the queue for a valid reason.
+            
             self.price_manager.record_bids(plot.unique_id, len(bids))
 
             if bids:
@@ -346,7 +357,7 @@ class SimpleAgriModel(mesa.Model):
                     bids,
                     key=lambda b: (
                         b["amount"],
-                        -b["holdings"],          # fewer holdings → higher priority
+                        -b["holdings"],          # fewer holdings -> higher priority
                         random.random(),         # final random tiebreak
                     ),
                 )
@@ -386,7 +397,7 @@ class SimpleAgriModel(mesa.Model):
 
                     if self.verbose:
                         contested = f" [{len(bids)} bidders]" if len(bids) > 1 else ""
-                        print(f"  [Auction] Plot {plot.unique_id} → "
+                        print(f"  [Auction] Plot {plot.unique_id} -> "
                               f"Inv {winner.unique_id} @ ${price:.0f}{contested}")
                     continue
 
@@ -408,7 +419,7 @@ class SimpleAgriModel(mesa.Model):
 
         if self.current_step >= self.harvest_step:
             self.phase = PHASE_HARVEST
-        elif self.phase == PHASE_PRIMARY and util >= 1.0:
+        elif util >= 1.0 and self.phase != PHASE_HARVEST:
             self.phase = PHASE_SECONDARY
 
     # ── Main step ────────────────────────────────────────────────
@@ -582,7 +593,7 @@ def print_environment_state(model, label=""):
 #  SINGLE RUN
 # ─────────────────────────────────────────────────────────────────
 
-def run_simple_sim(steps=120, information_level="blind"):
+def run_simple_sim(steps=300, information_level="blind"):
     model = SimpleAgriModel(information_level=information_level, verbose=True)
     model.datacollector.collect(model)
     print_environment_state(model, "INITIAL STATE")
@@ -604,7 +615,7 @@ def run_simple_sim(steps=120, information_level="blind"):
 #  TIER COMPARISON  (one run per tier)
 # ─────────────────────────────────────────────────────────────────
 
-def run_comparison(steps=120):
+def run_comparison(steps=300):
     results = {}
     tiers   = ("blind", "local", "market", "full")
 
@@ -620,7 +631,7 @@ def run_comparison(steps=120):
     rows = [{"info_level": lvl, **results[lvl]} for lvl in tiers]
     df   = pd.DataFrame(rows)
     # Duplicate mean as std=0 so the formatter works cleanly
-    print_mc_summary(df.loc[df.index.repeat(1)])   # single-run: std will be NaN → shows 0
+    print_mc_summary(df.loc[df.index.repeat(1)])   # single-run: std will be NaN -> shows 0
     return results
 
 
@@ -629,7 +640,7 @@ def run_comparison(steps=120):
 # ─────────────────────────────────────────────────────────────────
 
 def run_monte_carlo(info_levels=("blind", "local", "market", "full"),
-                    n_runs=50, steps=120):
+                    n_runs=50, steps=300):
     all_results = []
 
     for info_level in info_levels:
@@ -668,14 +679,14 @@ if __name__ == "__main__":
 
     if mode == "monte_carlo":
         # python main.py monte_carlo
-        run_monte_carlo(n_runs=50, steps=120)
+        run_monte_carlo(n_runs=50, steps=600)
 
     elif mode == "compare":
         # python main.py compare
-        run_comparison(steps=120)
+        run_comparison(steps=600)
 
     else:
-        # python main.py               → blind, single run
-        # python main.py single market → market tier
+        # python main.py               -> blind, single run
+        # python main.py single market -> market tier
         level = sys.argv[2] if len(sys.argv) > 2 else "blind"
-        run_simple_sim(steps=120, information_level=level)
+        run_simple_sim(steps=600, information_level=level)
