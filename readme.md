@@ -4,12 +4,39 @@
 
 This is an early prototype inspired by the idea of investors prepaying for fractions of a farm's future produce (like tech companies prepaying for RAM), with the goal of eventually simulating secondary trading of contracts when the farm is "sold out" and expansion loans are delayed.
 
+
 ## Current Features (v0.2 – Advanced Primary Market)
 
 
 - One farmer owns 16 tomato plots (each ~1/4 acre equivalent).
 
 - 20 investors (half speculators, half conservative) evaluate offers using a simple valuation formula
+
+
+```mermaid
+flowchart TD
+    WS["🌦 weather_shock\ngauss(0, 0.15) per step"]
+
+    subgraph Model["SimpleAgriModel — 120 steps"]
+        Farmer["Farmer\ncapital · plots[]\ndynamic pricing"]
+        Offers[("offers[]\nplot · price")]
+        Plots["Plot ×16\nreserved_by · contract_price"]
+        Spec["Speculator\n$20k · risk 0.05 · bid ×1.3"]
+        Cons["Conservative\n$15k · risk 0.20 · bid ×0.9"]
+        DC["DataCollector\nUtilization per step"]
+    end
+
+    WS -->|influences risk| Spec
+    WS -->|influences risk| Cons
+    Farmer -->|post offer| Offers
+    Farmer -->|owns| Plots
+    Offers -->|evaluate| Spec
+    Offers -->|evaluate| Cons
+    Spec -.->|reserve plot| Plots
+    Cons -.->|reserve plot| Plots
+    Plots -->|utilization| DC
+```
+
 
 - **Dynamic Farmer Pricing**: The farmer now raises prices as utilization (pre-sold plots) increases, simulating price discovery pressure.
 - **Differentiated Investors**: Investors are split into **Speculators** (high risk tolerance, aggressive bidding) and **Conservative** (low risk tolerance, cautious bidding).
@@ -35,6 +62,9 @@ We are testing the hypothesis that **information symmetry significantly impacts 
 | **Full** | All holdings & valuations | Bidding up based on observed competitor interest |
 
 **Hypothesis**: *Market volatility will decrease but wealth concentration (Gini coefficient) will increase as information availability moves from Blind to Market tiers.*
+
+<img width="1410" height="1078" alt="image" src="https://github.com/user-attachments/assets/24f35675-6250-4a9e-a191-cd60a10c954f" />
+
 
 ## Secondary Market (Milestone 2)
 
@@ -113,7 +143,7 @@ python main.py
 ## Requirements
 
 ```text
-mesa>=3.5.0
+mesa>=3.5.1
 pandas
 numpy
 # optional for viz later: streamlit altair
