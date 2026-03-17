@@ -68,10 +68,27 @@ We are testing the hypothesis that **information symmetry significantly impacts 
 | **Market** | Average recent trade prices | Values tied to `model.public_price_index` |
 | **Full** | All holdings & valuations | Bidding up based on observed competitor interest |
 
+Each Investor takes an information_level parameter and adjusts value_contract() accordingly — blind agents use the base formula, local agents anchor to their own trade history, market agents anchor to a rolling public_price_index, and full agents also factor in how many competitors are eyeing the same plot.
+Three run modes, selectable from the command line:
+
 **Hypothesis**: *Market volatility will decrease but wealth concentration (Gini coefficient) will increase as information availability moves from Blind to Market tiers.*
 
 <img width="1410" height="1078" alt="image" src="https://github.com/user-attachments/assets/24f35675-6250-4a9e-a191-cd60a10c954f" />
 
+Research Design Suggestions for this project:
+
+Controlled variable: information level (blind / market / full)
+Outcome metrics to track: price volatility, time-to-full-utilization, Gini coefficient of holdings concentration, secondary market volume
+Run Monte Carlo early: even 50 runs with different seeds will show you whether effects are real or noise
+
+
+A simple experiment runner
+```
+for info_level in ["blind", "market", "full"]:
+    for seed in range(50):
+        model = SimpleAgriModel(information_level=info_level, seed=seed)
+        # collect results
+```
 
 ## Secondary Market (Milestone 2)
 
