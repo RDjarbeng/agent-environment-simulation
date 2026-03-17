@@ -4,7 +4,8 @@
 
 This is an early prototype inspired by the idea of investors prepaying for fractions of a farm's future produce (like tech companies prepaying for RAM), with the goal of eventually simulating secondary trading of contracts when the farm is "sold out" and expansion loans are delayed.
 
-## Current Features (v0.1 – Primary Market Only)
+## Current Features (v0.2 – Advanced Primary Market)
+
 
 - One farmer owns 16 tomato plots (each ~1/4 acre equivalent).
 
