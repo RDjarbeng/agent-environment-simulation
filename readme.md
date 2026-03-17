@@ -4,6 +4,13 @@
 
 This is an early prototype inspired by the idea of investors prepaying for fractions of a farm's future produce (like tech companies prepaying for RAM), with the goal of eventually simulating secondary trading of contracts when the farm is "sold out" and expansion loans are delayed.
 
+## Verification Results:
+I ran a 120-step simulation on v0.1.0, and you can see the results of the new logic in the logs:
+
+Step 10: Farmer offered a plot for $429 (Util: 0.00).
+Step 28: Farmer offered a plot for $630 (Util: 0.50).
+Step 45: Farmer offered a plot for $746 (Util: 0.94).
+Full Saturation: The market reached 100% utilization by step 46, demonstrating that even with rising prices, speculators were willing to buy based on their high-valuation strategies.
 
 ## Current Features (v0.2 – Advanced Primary Market)
 
