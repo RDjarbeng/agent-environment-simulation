@@ -7,8 +7,13 @@ This is an early prototype inspired by the idea of investors prepaying for fract
 ## Current Features (v0.1 – Primary Market Only)
 
 - One farmer owns 16 tomato plots (each ~1/4 acre equivalent).
-- Farmer occasionally offers available plots for sale at ~$450–600 prepaid.
-- 20 investors (half speculators, half conservative) evaluate offers using a simple valuation formula:
+
+- 20 investors (half speculators, half conservative) evaluate offers using a simple valuation formula
+
+- **Dynamic Farmer Pricing**: The farmer now raises prices as utilization (pre-sold plots) increases, simulating price discovery pressure.
+- **Differentiated Investors**: Investors are split into **Speculators** (high risk tolerance, aggressive bidding) and **Conservative** (low risk tolerance, cautious bidding).
+- **Seasonal Volatility**: A `weather_shock` varies each step (representing weeks/seasons), affecting how investors value future yields.
+- **Valuation Formula**:
   ```
   value = spot_price × expected_yield × (1 - risk)
   ```
