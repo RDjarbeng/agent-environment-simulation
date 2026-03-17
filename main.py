@@ -523,6 +523,72 @@ def compute_run_metrics(model, steps):
 
 
 # ─────────────────────────────────────────────────────────────────
+#  TERMINAL TABLE FORMATTER
+# ─────────────────────────────────────────────────────────────────
+
+def _fmt(val, decimals=2):
+    """Format a number neatly for terminal output."""
+    if isinstance(val, float):
+        return f"{val:.{decimals}f}"
+    return str(val)
+
+
+def print_mc_summary(df):
+    """
+    Print a clean, readable Monte Carlo summary table in the terminal.
+    Avoids pandas MultiIndex column wrapping issues.
+    """
+    tiers = sorted(df["info_level"].unique())
+
+    metrics = [
+        ("time_to_saturation",    "Time to saturation",     0),
+        ("final_utilization",     "Final utilization",      2),
+        ("avg_trade_price",       "Avg trade price ($)",    0),
+        ("price_volatility",      "Price volatility (σ)",   1),
+        ("gini_holdings",         "Gini (holdings)",        3),
+        ("speculator_holdings",   "Speculator holdings",    1),
+        ("conservative_holdings", "Conservative holdings",  1),
+        ("num_trades",            "Total trades",           1),
+        ("contested_trades",      "Contested trades",       1),
+        ("avg_bidders",           "Avg bidders / trade",    2),
+        ("secondary_trades",      "Secondary trades",       1),
+        ("farmer_capital",        "Farmer capital ($)",     0),
+    ]
+
+    col_w    = 18   # width per tier column
+    label_w  = 26   # width for metric label column
+
+    # ── Header ──────────────────────────────────────────────────
+    divider = "─" * (label_w + len(tiers) * col_w + 2)
+    header  = f"{'Metric':<{label_w}}" + "".join(
+        f"{'mean':>{col_w//2}}{'±std':>{col_w//2}}" for _ in tiers
+    )
+    tier_row = " " * label_w + "".join(f"{t:^{col_w}}" for t in tiers)
+
+    print()
+    print("=== MONTE CARLO SUMMARY (50 runs per tier) ===")
+    print(divider)
+    print(tier_row)
+    print(f"{'':>{label_w}}" + ("  mean      ±std  " * len(tiers)))
+    print(divider)
+
+    # ── Rows ────────────────────────────────────────────────────
+    for col, label, dec in metrics:
+        row = f"{label:<{label_w}}"
+        for tier in tiers:
+            sub  = df[df["info_level"] == tier][col]
+            mean = sub.mean()
+            std  = sub.std()
+            mean_s = _fmt(mean, dec)
+            std_s  = f"±{_fmt(std, dec)}"
+            row   += f"{mean_s:>{col_w//2}}{std_s:>{col_w//2}}"
+        print(row)
+
+    print(divider)
+    print()
+
+
+# ─────────────────────────────────────────────────────────────────
 #  PRINT HELPERS
 # ─────────────────────────────────────────────────────────────────
 
