@@ -288,6 +288,102 @@ class SimpleAgriModel(mesa.Model):
             }
         )
 
+    # ── Auction resolution ───────────────────────────────────────
+
+    def _resolve_auctions(self):
+        """
+        For every open lot:
+          - Tick staleness counter
+          - If bids received: highest bid wins, price_manager gets feedback
+          - If no bids and lot is stale (>8 steps): remove from queue
+        """
+        remaining = []
+        for entry in self.auction_queue:
+            plot      = entry["plot"]
+            ask       = entry["ask"]
+            bids      = entry["bids"]
+            source    = entry["source"]
+
+            entry["steps_open"] += 1
+            self.price_manager.tick_listed(plot.unique_id)
+
+            # Skip already-reserved plots (race condition guard)
+            if plot.reserved_by is not None:
+                self.price_manager.sold(plot.unique_id)
+                continue
+
+            self.price_manager.record_bids(plot.unique_id, len(bids))
+
+            if bids:
+                # Highest bid wins
+                winner_bid = max(bids, key=lambda b: b["amount"])
+                winner     = winner_bid["investor"]
+                price      = winner_bid["amount"]
+
+                if winner.capital >= price:
+                    # Execute trade
+                    winner.capital          -= price
+                    winner.holdings.append(plot)
+                    winner.price_memory.append(price)
+                    self.farmer.capital     += price
+
+                    # If secondary sale: seller gets proceeds, loses holding
+                    if source == "secondary" and "seller" in entry:
+                        seller = entry["seller"]
+                        seller.capital += price
+                        self.farmer.capital -= price   # net zero through farmer
+                        if plot in seller.holdings:
+                            seller.holdings.remove(plot)
+
+                    plot.reserved_by    = winner.unique_id
+                    plot.contract_price = price
+                    self.price_history.append(price)
+                    self.price_manager.sold(plot.unique_id)
+
+                    self.trade_log.append({
+                        "step":        self.current_step,
+                        "event":       "trade",
+                        "investor":    winner.unique_id,
+                        "plot":        plot.unique_id,
+                        "price":       price,
+                        "ask":         ask,
+                        "n_bidders":   len(bids),
+                        "is_speculator": winner.is_speculator,
+                        "info_level":  winner.information_level,
+                        "source":      source,
+                    })
+
+                    if self.verbose:
+                        print(f"  [Auction] Plot {plot.unique_id} → "
+                              f"Inv {winner.unique_id} @ ${price:.0f} "
+                              f"({len(bids)} bidder{'s' if len(bids)>1 else ''})")
+                    continue   # don't keep in queue
+
+            # No winning bid — keep if not too stale
+            if entry["steps_open"] <= 8:
+                entry["bids"] = []   # reset bids for next step
+                remaining.append(entry)
+            else:
+                if self.verbose:
+                    print(f"  [Auction] Plot {plot.unique_id} expired (no bids)")
+                self.price_manager.sold(plot.unique_id)
+
+        self.auction_queue = remaining
+
+    # ── Phase transitions ────────────────────────────────────────
+
+    def _update_phase(self):
+        reserved = sum(1 for p in self.farmer.plots if p.reserved_by is not None)
+        util     = reserved / len(self.farmer.plots)
+
+        if self.current_step >= self.harvest_step:
+            self.phase = PHASE_HARVEST
+
+        elif self.phase == PHASE_PRIMARY and util >= 1.0:
+            self.phase = PHASE_SECONDARY
+
+    # ── Main step ────────────────────────────────────────────────
+
     def step(self):
         self.current_step += 1
         self.weather_shock = random.gauss(0, 0.15)
