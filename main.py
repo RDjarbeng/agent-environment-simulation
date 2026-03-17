@@ -8,8 +8,61 @@ import numpy as np
 #   "blind"  – agent sees only the current offer price
 #   "local"  – agent remembers their own past trade prices
 #   "market" – agent sees rolling avg of all recent trades
-#   "full"   – market info + awareness of competitor interest
-# ─────────────────────────────────────────────
+#   "full"   – market info + awareness of how many others are bidding
+# ─────────────────────────────────────────────────────────────────
+
+# ── MODEL PHASES ─────────────────────────────────────────────────
+PHASE_PRIMARY   = "primary"    # farmer listing plots, investors buying
+PHASE_BANK      = "bank"       # utilization >= 0.8, farmer waiting on loan
+PHASE_SECONDARY = "secondary"  # primary sold out, only resale trades
+PHASE_HARVEST   = "harvest"    # end of season, contracts settled
+
+
+# ─────────────────────────────────────────────────────────────────
+#  PRICE MANAGER  (plain class, not a Mesa agent)
+#  Owns all ask-price logic so Farmer can focus on farming.
+# ─────────────────────────────────────────────────────────────────
+
+class PriceManager:
+    def __init__(self, base_price=450, utilization_premium=300, stale_discount=0.97):
+        self.base_price = base_price
+        self.utilization_premium = utilization_premium
+        self.stale_discount = stale_discount
+        self.bid_counts   = defaultdict(int)   # plot_id → bids received last step
+        self.steps_listed = defaultdict(int)   # plot_id → steps on market unsold
+
+    def compute_ask(self, plot, utilization):
+        """Calculate ask price for a newly listed plot."""
+        base = self.base_price + (utilization * self.utilization_premium)
+
+        # Bid pressure from previous step: raise ask if multiple bidders competed
+        pressure = self.bid_counts.get(plot.unique_id, 0)
+        if pressure >= 3:
+            base *= 1.10
+        elif pressure == 2:
+            base *= 1.05
+
+        # Staleness discount: lower ask if plot has sat unsold
+        stale = self.steps_listed.get(plot.unique_id, 0)
+        if stale > 5:
+            base *= self.stale_discount ** (stale - 5)
+
+        return int(base + random.randint(-20, 20))
+
+    def record_bids(self, plot_id, count):
+        self.bid_counts[plot_id] = count
+
+    def tick_listed(self, plot_id):
+        self.steps_listed[plot_id] += 1
+
+    def sold(self, plot_id):
+        self.bid_counts.pop(plot_id, None)
+        self.steps_listed.pop(plot_id, None)
+
+
+# ─────────────────────────────────────────────────────────────────
+#  PLOT
+# ─────────────────────────────────────────────────────────────────
 
 class Plot(mesa.Agent):
     def __init__(self, model, unique_id, crop="tomato"):
