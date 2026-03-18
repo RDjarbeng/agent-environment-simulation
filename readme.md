@@ -21,6 +21,7 @@ Full Saturation: The market reached 100% utilization by step 46, demonstrating t
 
 
 ```mermaid
+ %%{init: { 'theme':'neutral', 'sequence': {'useMaxWidth':false} } }%%
 flowchart TD
     WS["🌦 weather_shock\ngauss(0, 0.15) per step"]
 
