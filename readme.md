@@ -259,6 +259,9 @@ Next realistic steps toward more interesting behavior:
 - Add simple goals / utility functions that vary between agents
 - (much later) reinforcement learning or simple genetic algorithm adaptation
 
+## Demo on Hugging face
+Simulation is online at [Hugging face](https://huggingface.co/spaces/rdjarbeng/agrimarket-abm):
+<img width="1361" height="609" alt="image" src="https://github.com/user-attachments/assets/dbc26350-271f-457a-892f-03437d96497d" />
 
 ## License
 
