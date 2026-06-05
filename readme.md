@@ -4,6 +4,11 @@
 
 This is an early prototype inspired by the idea of investors prepaying for fractions of a farm's future produce (like tech companies prepaying for RAM), with the goal of eventually simulating secondary trading of contracts when the farm is "sold out" and expansion loans are delayed.
 
+## Demo on Hugging face
+Simulation is online at [Hugging face](https://huggingface.co/spaces/rdjarbeng/agrimarket-abm):
+<img width="1361" height="609" alt="image" src="https://github.com/user-attachments/assets/dbc26350-271f-457a-892f-03437d96497d" />
+
+
 ## Verification Results:
 I ran a 120-step simulation on v0.1.0, and you can see the results of the new logic in the logs:
 ```
@@ -259,9 +264,6 @@ Next realistic steps toward more interesting behavior:
 - Add simple goals / utility functions that vary between agents
 - (much later) reinforcement learning or simple genetic algorithm adaptation
 
-## Demo on Hugging face
-Simulation is online at [Hugging face](https://huggingface.co/spaces/rdjarbeng/agrimarket-abm):
-<img width="1361" height="609" alt="image" src="https://github.com/user-attachments/assets/dbc26350-271f-457a-892f-03437d96497d" />
 
 ## License
 
